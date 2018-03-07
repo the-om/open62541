@@ -645,7 +645,6 @@ UA_Client_connect_securechannel(UA_Client *client, const char *endpointUrl) {
     return UA_Client_connectInternal(client, endpointUrl, UA_FALSE, UA_FALSE);
 }
 
-
 UA_StatusCode
 UA_Client_connect_username(UA_Client *client, const char *endpointUrl,
                            const char *username, const char *password) {

@@ -12,6 +12,60 @@
 #ifdef UA_ENABLE_DISCOVERY
 
 static UA_StatusCode
+findEndpointForRegistration(const UA_EndpointDescription endpoints[], size_t endpointsSize,
+                            const UA_SecurityPolicy *const supportedPolicies[], size_t supportedPoliciesSize,
+                            UA_EndpointDescription *outEndpoint, const UA_SecurityPolicy **outPolicy) {
+    const UA_String supportedTransports[] = {
+        UA_STRING("http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary")
+    };
+    size_t supportedTransportsSize = sizeof(supportedTransports) / sizeof(supportedTransports[0]);
+
+    for(size_t policyIndex = 0; policyIndex < supportedPoliciesSize; ++policyIndex) {
+        const UA_SecurityPolicy *policy = supportedPolicies[policyIndex];
+        /* register server requires security */
+        if(UA_String_equal(&policy->policyUri, &UA_SECURITY_POLICY_NONE_URI))
+            continue;
+
+        for(size_t endpointIndex = 0; endpointIndex < endpointsSize; ++endpointIndex) {
+            const UA_EndpointDescription *endpoint = &endpoints[endpointIndex];
+
+            if(!UA_String_equal(&endpoint->securityPolicyUri, &policy->policyUri))
+                continue;
+
+            UA_Boolean transportFound = UA_FALSE;
+            for(size_t transportIndex = 0; transportIndex < supportedTransportsSize; ++transportIndex) {
+                if(UA_String_equal(&endpoint->transportProfileUri, &supportedTransports[transportIndex])) {
+                    transportFound = UA_TRUE;
+                    break;
+                }
+            }
+            if(!transportFound)
+                continue;
+
+            UA_Boolean tokenFound = UA_FALSE;
+            for(size_t tokenIndex = 0; tokenIndex < endpoint->userIdentityTokensSize; ++tokenIndex) {
+                const UA_UserTokenPolicy *userToken = &endpoint->userIdentityTokens[tokenIndex];
+                if(userToken->tokenType == UA_USERTOKENTYPE_ANONYMOUS) {
+                    tokenFound = UA_TRUE;
+                    break;
+                }
+            }
+            if(!tokenFound)
+                continue;
+
+            UA_StatusCode copyStatus = UA_EndpointDescription_copy(endpoint, outEndpoint);
+            if(copyStatus != UA_STATUSCODE_GOOD) {
+                return copyStatus;
+            }
+            *outPolicy = policy;
+            return UA_STATUSCODE_GOOD;
+        }
+    }
+
+    return UA_STATUSCODE_BADNOTFOUND;
+}
+
+static UA_StatusCode
 register_server_with_discovery_server(UA_Server *server,
                                       const char* discoveryServerUrl,
                                       const UA_Boolean isUnregister,
@@ -28,8 +82,8 @@ register_server_with_discovery_server(UA_Server *server,
     if(!client)
         return UA_STATUSCODE_BADOUTOFMEMORY;
 
-    /* Connect the client */
-    UA_StatusCode retval = UA_Client_connect(client, discoveryServerUrl);
+    /* Connect the client to get LDS' endpoints */
+    UA_StatusCode retval = UA_Client_connect_securechannel(client, discoveryServerUrl);
     if(retval != UA_STATUSCODE_GOOD) {
         UA_LOG_ERROR(server->config.logger, UA_LOGCATEGORY_CLIENT,
                      "Connecting to the discovery server failed with statuscode %s",
@@ -38,6 +92,84 @@ register_server_with_discovery_server(UA_Server *server,
         UA_Client_delete(client);
         return retval;
     }
+
+    UA_EndpointDescription *endpointArray = NULL;
+    size_t endpointArraySize = 0;
+    UA_Client_getEndpointsInternal(client, &endpointArraySize, &endpointArray);
+
+    UA_Client_disconnect(client);
+
+    /* gather supported security policies from the server endpoints */
+    size_t supportedPoliciesSize = server->config.endpointsSize;
+    UA_SecurityPolicy **supportedPolicies = NULL;
+    if(supportedPoliciesSize > 0) {
+        supportedPolicies = (UA_SecurityPolicy **)UA_malloc(sizeof(UA_SecurityPolicy *) * supportedPoliciesSize);
+    } else {
+        /* Server has no endpoints */
+        UA_Array_delete(endpointArray, endpointArraySize, &UA_TYPES[UA_TYPES_ENDPOINTDESCRIPTION]);
+        UA_Client_delete(client);
+        return UA_STATUSCODE_BADINTERNALERROR;
+    }
+    if(supportedPolicies == NULL) {
+        UA_Array_delete(endpointArray, endpointArraySize, &UA_TYPES[UA_TYPES_ENDPOINTDESCRIPTION]);
+        UA_Client_delete(client);
+        return UA_STATUSCODE_BADOUTOFMEMORY;
+    }
+    for(size_t i = 0; i < server->config.endpointsSize; ++i) {
+        supportedPolicies[i] = &server->config.endpoints[i].securityPolicy;
+    }
+
+    /* find a matching LDS endpoint */
+    UA_EndpointDescription registerEndpoint;
+    UA_EndpointDescription_init(&registerEndpoint);
+    const UA_SecurityPolicy *policy = NULL;
+
+    retval = findEndpointForRegistration(
+        endpointArray,
+        endpointArraySize,
+        supportedPolicies,
+        supportedPoliciesSize,
+        &registerEndpoint,
+        &policy
+    );
+    UA_Array_delete(endpointArray, endpointArraySize, &UA_TYPES[UA_TYPES_ENDPOINTDESCRIPTION]);
+    UA_free(supportedPolicies);
+    if(retval != UA_STATUSCODE_GOOD) {
+        UA_EndpointDescription_deleteMembers(&registerEndpoint);
+        UA_Client_delete(client);
+        return UA_STATUSCODE_BADSECURITYMODEREJECTED; // TODO: What is the best fitting return code?
+    }
+
+    /* connect again */
+    char *urlCopy = (char *)UA_malloc(registerEndpoint.endpointUrl.length + 1);
+    if(urlCopy == NULL) {
+        UA_EndpointDescription_deleteMembers(&registerEndpoint);
+        UA_Client_delete(client);
+        return UA_STATUSCODE_BADOUTOFMEMORY;
+    }
+    memcpy(urlCopy, registerEndpoint.endpointUrl.data, registerEndpoint.endpointUrl.length);
+    urlCopy[registerEndpoint.endpointUrl.length] = '\0';
+
+    /* set up channel according to policy */
+    UA_SecureChannel_init(&client->channel, policy, &registerEndpoint.serverCertificate);
+    client->channel.securityMode = registerEndpoint.securityMode;
+    UA_SecureChannel_generateLocalNonce(&client->channel);
+
+    UA_EndpointDescription_deleteMembers(&registerEndpoint);
+
+    retval = UA_Client_connect_securechannel(client, urlCopy);
+    UA_free(urlCopy);
+    if(retval != UA_STATUSCODE_GOOD) {
+        UA_LOG_ERROR(server->config.logger, UA_LOGCATEGORY_CLIENT,
+            "Connecting to the discovery server failed with statuscode %s",
+            UA_StatusCode_name(retval));
+        UA_Client_disconnect(client);
+        client->channel.securityPolicy = NULL; // avoid delete of channelContext in UA_Client_delete
+        UA_Client_delete(client);
+        return retval;
+    }
+
+    UA_SecureChannel_generateNewKeys(&client->channel);
 
     /* Prepare the request. Do not cleanup the request after the service call,
      * as the members are stack-allocated or point into the server config. */
@@ -72,6 +204,12 @@ register_server_with_discovery_server(UA_Server *server,
     size_t total_discurls = config_discurls + nl_discurls;
     UA_STACKARRAY(UA_String, urlsBuf, total_discurls);
     request.server.discoveryUrls = urlsBuf;
+    if(request.server.discoveryUrls == NULL) {
+        UA_Client_disconnect(client);
+        client->channel.securityPolicy = NULL; // avoid delete of channelContext in UA_Client_delete
+        UA_Client_delete(client);
+        return UA_STATUSCODE_BADOUTOFMEMORY;
+    }
     request.server.discoveryUrlsSize = total_discurls;
 
     for(size_t i = 0; i < config_discurls; ++i)
@@ -133,6 +271,7 @@ register_server_with_discovery_server(UA_Server *server,
     }
 
     UA_Client_disconnect(client);
+    client->channel.securityPolicy = NULL; // avoid delete of channelContext in UA_Client_delete
     UA_Client_delete(client);
     return serviceResult;
 }
