@@ -81,6 +81,10 @@ UA_Client_getState(UA_Client *client);
 void UA_EXPORT *
 UA_Client_getContext(UA_Client *client);
 
+/* Get the secure channel */
+UA_SecureChannel UA_EXPORT *
+UA_Client_getSecurechannel(UA_Client *client);
+
 /* Reset a client */
 void UA_EXPORT
 UA_Client_reset(UA_Client *client);

@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. 
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  *    Copyright 2017 (c) Fraunhofer IOSB (Author: Julius Pfrommer)
  *    Copyright 2017 (c) Stefan Profanter, fortiss GmbH
@@ -95,9 +95,12 @@ register_server_with_discovery_server(UA_Server *server,
 
     UA_EndpointDescription *endpointArray = NULL;
     size_t endpointArraySize = 0;
-    UA_Client_getEndpointsInternal(client, &endpointArraySize, &endpointArray);
-
+    retval = UA_Client_getEndpoints(client, discoveryServerUrl, &endpointArraySize, &endpointArray);
     UA_Client_disconnect(client);
+    if(retval != UA_STATUSCODE_GOOD) {
+        UA_Client_delete(client);
+        return retval;
+    }
 
     /* gather supported security policies from the server endpoints */
     size_t supportedPoliciesSize = server->config.endpointsSize;
@@ -151,9 +154,10 @@ register_server_with_discovery_server(UA_Server *server,
     urlCopy[registerEndpoint.endpointUrl.length] = '\0';
 
     /* set up channel according to policy */
-    UA_SecureChannel_init(&client->channel, policy, &registerEndpoint.serverCertificate);
-    client->channel.securityMode = registerEndpoint.securityMode;
-    UA_SecureChannel_generateLocalNonce(&client->channel);
+	UA_SecureChannel *channel = UA_Client_getSecurechannel(client);
+    UA_SecureChannel_init(channel, policy, &registerEndpoint.serverCertificate);
+    channel->securityMode = registerEndpoint.securityMode;
+    UA_SecureChannel_generateLocalNonce(channel);
 
     UA_EndpointDescription_deleteMembers(&registerEndpoint);
 
@@ -164,12 +168,12 @@ register_server_with_discovery_server(UA_Server *server,
             "Connecting to the discovery server failed with statuscode %s",
             UA_StatusCode_name(retval));
         UA_Client_disconnect(client);
-        client->channel.securityPolicy = NULL; // avoid delete of channelContext in UA_Client_delete
+        channel->securityPolicy = NULL; // avoid delete of channelContext in UA_Client_delete
         UA_Client_delete(client);
         return retval;
     }
 
-    UA_SecureChannel_generateNewKeys(&client->channel);
+    UA_SecureChannel_generateNewKeys(channel);
 
     /* Prepare the request. Do not cleanup the request after the service call,
      * as the members are stack-allocated or point into the server config. */
@@ -206,7 +210,7 @@ register_server_with_discovery_server(UA_Server *server,
     request.server.discoveryUrls = urlsBuf;
     if(request.server.discoveryUrls == NULL) {
         UA_Client_disconnect(client);
-        client->channel.securityPolicy = NULL; // avoid delete of channelContext in UA_Client_delete
+        channel->securityPolicy = NULL; // avoid delete of channelContext in UA_Client_delete
         UA_Client_delete(client);
         return UA_STATUSCODE_BADOUTOFMEMORY;
     }
@@ -271,7 +275,7 @@ register_server_with_discovery_server(UA_Server *server,
     }
 
     UA_Client_disconnect(client);
-    client->channel.securityPolicy = NULL; // avoid delete of channelContext in UA_Client_delete
+    channel->securityPolicy = NULL; // avoid delete of channelContext in UA_Client_delete
     UA_Client_delete(client);
     return serviceResult;
 }
