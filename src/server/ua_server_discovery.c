@@ -22,9 +22,9 @@ findEndpointForRegistration(const UA_EndpointDescription endpoints[], size_t end
 
     for(size_t policyIndex = 0; policyIndex < supportedPoliciesSize; ++policyIndex) {
         const UA_SecurityPolicy *policy = supportedPolicies[policyIndex];
-        // /* register server requires security */
-        // if(UA_String_equal(&policy->policyUri, &UA_SECURITY_POLICY_NONE_URI))
-            // continue;
+        /* register server requires security */
+        if(UA_String_equal(&policy->policyUri, &UA_SECURITY_POLICY_NONE_URI))
+            continue;
 
         for(size_t endpointIndex = 0; endpointIndex < endpointsSize; ++endpointIndex) {
             const UA_EndpointDescription *endpoint = &endpoints[endpointIndex];
