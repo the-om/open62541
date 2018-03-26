@@ -157,7 +157,6 @@ register_server_with_discovery_server(UA_Server *server,
 	UA_SecureChannel *channel = UA_Client_getSecurechannel(client);
     UA_SecureChannel_init(channel, policy, &registerEndpoint.serverCertificate);
     channel->securityMode = registerEndpoint.securityMode;
-    UA_SecureChannel_generateLocalNonce(channel);
 
     UA_EndpointDescription_deleteMembers(&registerEndpoint);
 
@@ -172,8 +171,6 @@ register_server_with_discovery_server(UA_Server *server,
         UA_Client_delete(client);
         return retval;
     }
-
-    UA_SecureChannel_generateNewKeys(channel);
 
     /* Prepare the request. Do not cleanup the request after the service call,
      * as the members are stack-allocated or point into the server config. */
