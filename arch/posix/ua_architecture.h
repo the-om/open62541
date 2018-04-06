@@ -111,10 +111,25 @@ void UA_sleep_ms(size_t ms);
 #endif
 
 #include <stdlib.h>
+#ifdef UA_ENABLE_PUBSUB_CUSTOM_PUBLISH_MALLOC
+
+extern void * (*globalMalloc)(size_t size);
+extern void (*globalFree)(void *ptr);
+extern void * (*globalCalloc)(size_t nelem, size_t elsize);
+extern void * (*globalRealloc)(void *ptr, size_t size);
+# define UA_free(ptr) globalFree(ptr)
+# define UA_malloc(size) globalMalloc(size)
+# define UA_calloc(num, size) globalCalloc(num, size)
+# define UA_realloc(ptr, size) globalRealloc(ptr, size)
+
+#else
+
 #define UA_free free
 #define UA_malloc malloc
 #define UA_calloc calloc
 #define UA_realloc realloc
+
+#endif
 
 #include <stdio.h>
 #define UA_snprintf snprintf

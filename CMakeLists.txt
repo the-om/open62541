@@ -210,6 +210,10 @@ option(UA_ENABLE_PUBSUB_CUSTOM_PUBLISH_INTERRUPT
        "Use a custom implementation for the publisher (experimental)" OFF)
 mark_as_advanced(UA_ENABLE_PUBSUB_CUSTOM_PUBLISH_INTERRUPT)
 
+option(UA_ENABLE_PUBSUB_CUSTOM_PUBLISH_MALLOC
+       "Use a custom malloc for the publisher interrupt (experimental)" OFF)
+mark_as_advanced(UA_ENABLE_PUBSUB_CUSTOM_PUBLISH_MALLOC)
+
 option(UA_ENABLE_STATUSCODE_DESCRIPTIONS "Enable conversion of StatusCode to human-readable error message" ON)
 mark_as_advanced(UA_ENABLE_STATUSCODE_DESCRIPTIONS)
 
@@ -484,6 +488,7 @@ set(exported_headers ${exported_headers}
                      ${PROJECT_SOURCE_DIR}/include/ua_client_highlevel_async.h)
 
 set(internal_headers ${PROJECT_SOURCE_DIR}/deps/queue.h
+                     ${PROJECT_SOURCE_DIR}/plugins/ua_bufmalloc.h
                      ${PROJECT_SOURCE_DIR}/deps/pcg_basic.h
                      ${PROJECT_SOURCE_DIR}/deps/libc_time.h
                      ${PROJECT_SOURCE_DIR}/deps/base64.h
@@ -555,6 +560,7 @@ set(lib_sources ${PROJECT_SOURCE_DIR}/src/ua_types.c
                 ${PROJECT_SOURCE_DIR}/src/client/ua_client_worker.c
 
                 # dependencies
+                ${PROJECT_SOURCE_DIR}/plugins/ua_bufmalloc.c
                 ${PROJECT_SOURCE_DIR}/deps/libc_time.c
                 ${PROJECT_SOURCE_DIR}/deps/pcg_basic.c
                 ${PROJECT_SOURCE_DIR}/deps/base64.c)
