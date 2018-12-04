@@ -12,6 +12,13 @@ if(CMAKE_HOST_SYSTEM_NAME MATCHES "OpenBSD")
     add_definitions(-Wno-gnu-zero-variadic-macro-arguments)
 endif()
 
+if(APPLE)
+    # CLang on Apple complains about many cases like this:
+    # /Users/travis/build/open62541/open62541/tests/check_chunking.c:148:22: warning: implicit conversion changes signedness: 'size_t' (aka 'unsigned long') to 'intmax_t' (aka 'long') [-Wsign-conversion]
+    #    ck_assert_int_eq(counter,9); //10 chunks allocated - callback called 4 times
+    add_definitions(-Wno-sign-conversion)
+endif()
+
 include_directories(${PROJECT_SOURCE_DIR}/include)
 include_directories(${PROJECT_SOURCE_DIR}/deps)
 include_directories(${PROJECT_SOURCE_DIR}/src)
