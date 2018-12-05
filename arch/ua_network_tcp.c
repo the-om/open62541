@@ -10,7 +10,6 @@
 
 #define UA_INTERNAL
 #include "ua_network_tcp.h"
-#include "ua_log_stdout.h"
 #include "open62541_queue.h"
 #include "ua_util.h"
 
