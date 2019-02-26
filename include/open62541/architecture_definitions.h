@@ -22,17 +22,26 @@
 #ifdef UNDER_CE
 # include "stdint.h"
 #endif
-#if !defined(_MSC_VER) || _MSC_VER >= 1800
-# include <stdint.h>
-# include <stdbool.h> /* C99 Boolean */
-#else
-# include "ms_stdint.h"
-# if !defined(__bool_true_false_are_defined)
-#  define bool unsigned char
-#  define true 1
-#  define false 0
-#  define __bool_true_false_are_defined
+
+#ifdef _MSC_VER
+# ifndef __cplusplus
+#  if _MSC_VER >= 1800
+#   include <stdbool.h> /* C99 Boolean */
+#  elif !defined(__bool_true_false_are_defined)
+#   define bool unsigned char
+#   define true 1
+#   define false 0
+#   define __bool_true_false_are_defined
+#  endif
 # endif
+# if _MSC_VER >= 1600
+#  include <stdint.h>
+# else
+#  include "ms_stdint.h"
+# endif
+#else
+# include <stdbool.h> /* C99 Boolean */
+# include <stdint.h>
 #endif
 
 /* Include inttypes.h or workaround for older Visual Studios */
