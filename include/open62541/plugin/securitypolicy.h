@@ -375,7 +375,7 @@ struct UA_SecurityPolicy {
  * @param channelContext the retrieve data from.
  * @param maxEncryptionLength the maximum number of bytes that the data to
  *                            encrypt can be. */
-size_t
+size_t UA_EXPORT
 UA_SecurityPolicy_getRemoteAsymEncryptionBufferLengthOverhead(const UA_SecurityPolicy *securityPolicy,
                                                               const void *channelContext,
                                                               size_t maxEncryptionLength);
@@ -385,7 +385,7 @@ UA_SecurityPolicy_getRemoteAsymEncryptionBufferLengthOverhead(const UA_SecurityP
  *
  * @param server the server context.
  * @param securityPolicyUri the security policy to get the context of. */
-UA_SecurityPolicy *
+UA_EXPORT UA_SecurityPolicy *
 UA_SecurityPolicy_getSecurityPolicyByUri(const UA_Server *server,
                                          UA_ByteString *securityPolicyUri);
 
