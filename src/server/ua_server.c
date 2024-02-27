@@ -321,6 +321,48 @@ serverHouseKeeping(UA_Server *server, void *_) {
     unlockServer(server);
 }
 
+static UA_Boolean
+testStoppedCondition(UA_Server *server) {
+    /* Check if there are remaining server components that did not fully stop */
+    if(ZIP_ITER(UA_ServerComponentTree, &server->serverComponents,
+        checkServerComponent, server) != NULL)
+        return false;
+    return true;
+}
+
+static UA_Boolean
+checkServerStopped(UA_Server *server) {
+    if(testStoppedCondition(server)) {
+        /* Once all components have stopped we can consider the server stopped aswell. */
+        if(!server->config.externalEventLoop) {
+            /* Stop the event loop */
+            server->config.eventLoop->stop(server->config.eventLoop);
+        }
+        setServerLifecycleState(server, UA_LIFECYCLESTATE_STOPPED);
+        return true;
+    }
+    return false;
+}
+
+static void
+notifyComponentStopped(UA_Server *server, struct UA_ServerComponent *sc,
+    UA_LifecycleState state) {
+    if(sc->state != UA_LIFECYCLESTATE_STOPPED) {
+        return;
+    }
+    if(server->state == UA_LIFECYCLESTATE_STOPPING) {
+        /* The server is stopping and is waiting for all of its components to stop */
+        sc->notifyState = NULL;
+        checkServerStopped(server);
+    } else if(server->state == UA_LIFECYCLESTATE_STARTED) {
+        UA_String strBinary = UA_STRING("binary");
+        if(UA_String_equal(&sc->name, &strBinary)) {
+            /* Restart the binary protocol manager. */
+            sc->start(server, sc);
+        }
+    }
+}
+
 /********************/
 /* Server Lifecycle */
 /********************/
@@ -375,11 +417,15 @@ UA_Server_init(UA_Server *server) {
 #endif
 
     /* Initialize the binay protocol support */
-    addServerComponent(server, UA_BinaryProtocolManager_new(server), NULL);
+    UA_ServerComponent *binaryProtocolManager = UA_BinaryProtocolManager_new(server);
+    binaryProtocolManager->notifyState = notifyComponentStopped;
+    addServerComponent(server, binaryProtocolManager, NULL);
 
     /* Initialized discovery */
 #ifdef UA_ENABLE_DISCOVERY
-    addServerComponent(server, UA_DiscoveryManager_new(server), NULL);
+    UA_ServerComponent *discoveryManager = UA_DiscoveryManager_new(server);
+    discoveryManager->notifyState = notifyComponentStopped;
+    addServerComponent(server, discoveryManager, NULL);
 #endif
 
     /* Initialize namespace 0*/
@@ -519,17 +565,7 @@ void
 UA_Server_removeCallback(UA_Server *server, UA_UInt64 callbackId) {
     lockServer(server);
     removeCallback(server, callbackId);
-    unlockServer(server);
-}
-
-static void
-notifySecureChannelsStopped(UA_Server *server, struct UA_ServerComponent *sc,
-                            UA_LifecycleState state) {
-    if(sc->state == UA_LIFECYCLESTATE_STOPPED &&
-       server->state == UA_LIFECYCLESTATE_STARTED) {
-        sc->notifyState = NULL; /* remove the callback */
-        sc->start(server, sc);
-    }
+    UA_UNLOCK(&server->serviceMutex);
 }
 
 UA_StatusCode
@@ -554,13 +590,12 @@ UA_Server_updateCertificate(UA_Server *server,
         }
     }
 
-    /* Gracefully close all SecureChannels. And restart the
-     * BinaryProtocolManager once it has fully stopped. */
+    /* Gracefully close all SecureChannels.
+     * The BinaryProtocolManager will be restarted once it has fully stopped. */
     if(closeSecureChannels) {
         UA_ServerComponent *binaryProtocolManager =
             getServerComponentByName(server, UA_STRING("binary"));
         if(binaryProtocolManager) {
-            binaryProtocolManager->notifyState = notifySecureChannelsStopped;
             binaryProtocolManager->stop(server, binaryProtocolManager);
         }
     }
@@ -657,8 +692,13 @@ setServerLifecycleState(UA_Server *server, UA_LifecycleState state) {
     if(server->state == state)
         return;
     server->state = state;
-    if(server->config.notifyLifecycleState)
-        server->config.notifyLifecycleState(server, server->state);
+    void (*notifyLifecycleState)(UA_Server *server, UA_LifecycleState state) = server->config.notifyLifecycleState;
+    if(notifyLifecycleState) {
+        unlockServer(server);
+        notifyLifecycleState(server, server->state);
+        /* TODO: should think about if we can support a user calling UA_ServerDelete in the notify callback when the state is UA_LIFECYCLESTATE_STOPPED */
+        lockServer(server);
+    }
 }
 
 UA_LifecycleState
@@ -833,15 +873,6 @@ testShutdownCondition(UA_Server *server) {
     return (UA_DateTime_now() > server->endTime);
 }
 
-static UA_Boolean
-testStoppedCondition(UA_Server *server) {
-    /* Check if there are remaining server components that did not fully stop */
-    if(ZIP_ITER(UA_ServerComponentTree, &server->serverComponents,
-                checkServerComponent, server) != NULL)
-        return false;
-    return true;
-}
-
 UA_StatusCode
 UA_Server_run_shutdown(UA_Server *server) {
     if(server == NULL)
@@ -870,41 +901,33 @@ UA_Server_run_shutdown(UA_Server *server) {
     UA_PubSubManager_shutdown(server, &server->pubSubManager);
 #endif
 
-    /* Stop all ServerComponents */
-    ZIP_ITER(UA_ServerComponentTree, &server->serverComponents,
-             stopServerComponent, server);
+    UA_Boolean externalEventLoop = server->config.externalEventLoop;
+    UA_EventLoop * el = server->config.eventLoop;
 
     /* Are we already stopped? */
-    if(testStoppedCondition(server)) {
-        setServerLifecycleState(server, UA_LIFECYCLESTATE_STOPPED);
+
+    if(!checkServerStopped(server)) {
+        /* Stop all ServerComponents */
+        ZIP_ITER(UA_ServerComponentTree, &server->serverComponents,
+                 stopServerComponent, server);
     }
 
+    unlockServer(server);
+
     /* Only stop the EventLoop if it is coupled to the server lifecycle  */
-    if(server->config.externalEventLoop) {
-        unlockServer(server);
+    if(externalEventLoop) {
         return UA_STATUSCODE_GOOD;
     }
 
-    /* Iterate the EventLoop until the server is stopped */
     UA_StatusCode res = UA_STATUSCODE_GOOD;
-    UA_EventLoop *el = server->config.eventLoop;
-    while(!testStoppedCondition(server) &&
-          res == UA_STATUSCODE_GOOD) {
-        res = el->run(el, 100);
-    }
 
-    /* Stop the EventLoop. Iterate until stopped. */
-    el->stop(el);
+    /* Iterate until the event loop is stopped */
     while(el->state != UA_EVENTLOOPSTATE_STOPPED &&
           el->state != UA_EVENTLOOPSTATE_FRESH &&
           res == UA_STATUSCODE_GOOD) {
         res = el->run(el, 100);
     }
 
-    /* Set server lifecycle state to stopped if not already the case */
-    setServerLifecycleState(server, UA_LIFECYCLESTATE_STOPPED);
-
-    unlockServer(server);
     return res;
 }
 
