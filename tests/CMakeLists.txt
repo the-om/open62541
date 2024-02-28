@@ -311,6 +311,7 @@ ua_add_test(server/check_session.c)
 ua_add_test(server/check_server.c)
 ua_add_test(server/check_server_jobs.c)
 ua_add_test(server/check_server_userspace.c)
+ua_add_test(server/check_server_eventloop.c)
 ua_add_test(server/check_node_inheritance.c)
 
 if(UA_ENABLE_SUBSCRIPTIONS)

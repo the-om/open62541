@@ -23,8 +23,8 @@ UA_EventLoopPOSIX_registerFD(UA_EventLoopPOSIX *el, UA_RegisteredFD *rfd) {
     int err = epoll_ctl(el->epollfd, EPOLL_CTL_ADD, rfd->fd, &event);
     if(err != 0) {
         UA_LOG_SOCKET_ERRNO_WRAP(
-           UA_LOG_WARNING(el->eventLoop.logger, UA_LOGCATEGORY_NETWORK,
-                          "TCP %u\t| Could not register for epoll (%s)",
+           UA_LOG_WARNING(el->eventLoop.logger, UA_LOGCATEGORY_EVENTLOOP,
+                          "FD %u\t| Could not register for epoll (%s)",
                           rfd->fd, errno_str));
         return UA_STATUSCODE_BADINTERNALERROR;
     }
@@ -45,8 +45,8 @@ UA_EventLoopPOSIX_modifyFD(UA_EventLoopPOSIX *el, UA_RegisteredFD *rfd) {
     int err = epoll_ctl(el->epollfd, EPOLL_CTL_MOD, rfd->fd, &event);
     if(err != 0) {
         UA_LOG_SOCKET_ERRNO_WRAP(
-           UA_LOG_WARNING(el->eventLoop.logger, UA_LOGCATEGORY_NETWORK,
-                          "TCP %u\t| Could not modify for epoll (%s)",
+           UA_LOG_WARNING(el->eventLoop.logger, UA_LOGCATEGORY_EVENTLOOP,
+                          "FD %u\t| Could not modify for epoll (%s)",
                           rfd->fd, errno_str));
         return UA_STATUSCODE_BADINTERNALERROR;
     }
@@ -58,8 +58,8 @@ UA_EventLoopPOSIX_deregisterFD(UA_EventLoopPOSIX *el, UA_RegisteredFD *rfd) {
     int res = epoll_ctl(el->epollfd, EPOLL_CTL_DEL, rfd->fd, NULL);
     if(res != 0) {
         UA_LOG_SOCKET_ERRNO_WRAP(
-           UA_LOG_WARNING(el->eventLoop.logger, UA_LOGCATEGORY_NETWORK,
-                          "TCP %u\t| Could not deregister from epoll (%s)",
+           UA_LOG_WARNING(el->eventLoop.logger, UA_LOGCATEGORY_EVENTLOOP,
+                          "FD %u\t| Could not deregister from epoll (%s)",
                           rfd->fd, errno_str));
     }
 }
@@ -94,8 +94,8 @@ UA_EventLoopPOSIX_pollFDs(UA_EventLoopPOSIX *el, UA_DateTime listenTimeout) {
             return UA_STATUSCODE_GOOD;
         }
         UA_LOG_SOCKET_ERRNO_WRAP(
-           UA_LOG_WARNING(el->eventLoop.logger, UA_LOGCATEGORY_NETWORK,
-                          "TCP\t| Error %s, closing the server socket",
+           UA_LOG_WARNING(el->eventLoop.logger, UA_LOGCATEGORY_EVENTLOOP,
+                          "epoll_wait\t| Error %s, closing the server socket",
                           errno_str));
         return UA_STATUSCODE_BADINTERNALERROR;
     }
