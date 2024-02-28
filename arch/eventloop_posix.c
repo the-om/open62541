@@ -78,7 +78,7 @@ UA_EventLoopPOSIX_addDelayedCallback(UA_EventLoop *public_el,
 
 static void
 UA_EventLoopPOSIX_removeDelayedCallback(UA_EventLoop *public_el,
-                                     UA_DelayedCallback *dc) {
+                                        UA_DelayedCallback *dc) {
     UA_EventLoopPOSIX *el = (UA_EventLoopPOSIX*)public_el;
     UA_LOCK(&el->elMutex);
     UA_DelayedCallback **prev = &el->delayedCallbacks;
@@ -91,6 +91,37 @@ UA_EventLoopPOSIX_removeDelayedCallback(UA_EventLoop *public_el,
         prev = &(*prev)->next;
     }
     UA_UNLOCK(&el->elMutex);
+}
+
+static void
+checkClosed(UA_EventLoopPOSIX *el) {
+    UA_LOCK_ASSERT(&el->elMutex, 1);
+
+    if(el->eventLoop.state != UA_EVENTLOOPSTATE_STOPPING)
+        return;
+
+    UA_EventSource *es = el->eventLoop.eventSources;
+    while(es) {
+        if(es->state != UA_EVENTSOURCESTATE_STOPPED)
+            return;
+        es = es->next;
+    }
+
+    /* Not closed until all delayed callbacks are processed */
+    if(el->delayedCallbacks != NULL)
+        return;
+
+    /* Dirty-write the state that is const "from the outside" */
+    *(UA_EventLoopState*)(uintptr_t)&el->eventLoop.state =
+        UA_EVENTLOOPSTATE_STOPPED;
+
+    /* Close the epoll/IOCP socket once all EventSources have shut down */
+#ifdef UA_HAVE_EPOLL
+    close(el->epollfd);
+#endif
+
+    UA_LOG_INFO(el->eventLoop.logger, UA_LOGCATEGORY_EVENTLOOP,
+                "The EventLoop has stopped");
 }
 
 /* Process and then free registered delayed callbacks */
@@ -115,6 +146,8 @@ processDelayed(UA_EventLoopPOSIX *el) {
             continue;
         dc->callback(dc->application, dc->context);
     }
+
+    checkClosed(el);
 }
 
 /***********************/
@@ -159,34 +192,6 @@ UA_EventLoopPOSIX_start(UA_EventLoopPOSIX *el) {
 
     UA_UNLOCK(&el->elMutex);
     return res;
-}
-
-static void
-checkClosed(UA_EventLoopPOSIX *el) {
-    UA_LOCK_ASSERT(&el->elMutex, 1);
-
-    UA_EventSource *es = el->eventLoop.eventSources;
-    while(es) {
-        if(es->state != UA_EVENTSOURCESTATE_STOPPED)
-            return;
-        es = es->next;
-    }
-
-    /* Not closed until all delayed callbacks are processed */
-    if(el->delayedCallbacks != NULL)
-        return;
-
-    /* Dirty-write the state that is const "from the outside" */
-    *(UA_EventLoopState*)(uintptr_t)&el->eventLoop.state =
-        UA_EVENTLOOPSTATE_STOPPED;
-
-    /* Close the epoll/IOCP socket once all EventSources have shut down */
-#ifdef UA_HAVE_EPOLL
-    close(el->epollfd);
-#endif
-
-    UA_LOG_INFO(el->eventLoop.logger, UA_LOGCATEGORY_EVENTLOOP,
-                "The EventLoop has stopped");
 }
 
 static void
@@ -260,6 +265,14 @@ UA_EventLoopPOSIX_run(UA_EventLoopPOSIX *el, UA_UInt32 timeout) {
      *   cyclic callback. So we want to do little work between the timeout
      *   running out and executing the due cyclic callbacks. */
     processDelayed(el);
+
+    if(el->eventLoop.state == UA_EVENTLOOPSTATE_STOPPED) {
+        /* Processing delayed callbacks may have stopped the loop at this point.
+         * Do not poll file descriptors again. */
+        el->executing = false;
+        UA_UNLOCK(&el->elMutex);
+        return UA_STATUSCODE_GOOD;
+    }
 
     /* A delayed callback could create another delayed callback (or re-add
      * itself). In that case we don't want to wait (indefinitely) for an event
