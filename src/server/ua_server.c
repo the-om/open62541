@@ -323,6 +323,7 @@ serverHouseKeeping(UA_Server *server, void *_) {
 
 static UA_Boolean
 testStoppedCondition(UA_Server *server) {
+    UA_LOCK_ASSERT(&server->serviceMutex, 1);
     /* Check if there are remaining server components that did not fully stop */
     if(ZIP_ITER(UA_ServerComponentTree, &server->serverComponents,
         checkServerComponent, server) != NULL)
@@ -332,13 +333,20 @@ testStoppedCondition(UA_Server *server) {
 
 static UA_Boolean
 checkServerStopped(UA_Server *server) {
+    UA_LOCK_ASSERT(&server->serviceMutex, 1);
+
     if(testStoppedCondition(server)) {
         /* Once all components have stopped we can consider the server stopped aswell. */
+        UA_EventLoop *el = NULL;
         if(!server->config.externalEventLoop) {
-            /* Stop the event loop */
-            server->config.eventLoop->stop(server->config.eventLoop);
+            el = server->config.eventLoop;
         }
         setServerLifecycleState(server, UA_LIFECYCLESTATE_STOPPED);
+        if(el) {            
+            /* Stop the event loop */
+            if(el->state != UA_EVENTLOOPSTATE_FRESH && el->state != UA_EVENTLOOPSTATE_STOPPED)
+                el->stop(el);
+        }
         return true;
     }
     return false;
@@ -350,6 +358,11 @@ notifyComponentStopped(UA_Server *server, struct UA_ServerComponent *sc,
     if(sc->state != UA_LIFECYCLESTATE_STOPPED) {
         return;
     }
+    
+    UA_LOCK_ASSERT(&server->serviceMutex, 1);
+    
+    UA_LOG_DEBUG(server->config.logging, UA_LOGCATEGORY_SERVER,
+                 "Server component " UA_PRINTF_STRING_FORMAT " stopped ", UA_PRINTF_STRING_DATA(sc->name));    
     if(server->state == UA_LIFECYCLESTATE_STOPPING) {
         /* The server is stopping and is waiting for all of its components to stop */
         sc->notifyState = NULL;
@@ -911,12 +924,13 @@ UA_Server_run_shutdown(UA_Server *server) {
 
     UA_UNLOCK(&server->serviceMutex);
 
+    UA_StatusCode res = UA_STATUSCODE_GOOD;
+
+#if 1
     /* Only stop the EventLoop if it is coupled to the server lifecycle  */
     if(externalEventLoop) {
         return UA_STATUSCODE_GOOD;
     }
-
-    UA_StatusCode res = UA_STATUSCODE_GOOD;
 
     /* Iterate until the event loop is stopped */
     while(el->state != UA_EVENTLOOPSTATE_STOPPED &&
@@ -924,6 +938,7 @@ UA_Server_run_shutdown(UA_Server *server) {
           res == UA_STATUSCODE_GOOD) {
         res = el->run(el, 100);
     }
+#endif
 
     return res;
 }
