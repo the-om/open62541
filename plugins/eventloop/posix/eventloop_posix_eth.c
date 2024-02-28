@@ -251,7 +251,7 @@ ETH_checkStopped(UA_POSIXConnectionManager *pcm) {
     if(pcm->fdsSize == 0 &&
        pcm->cm.eventSource.state == UA_EVENTSOURCESTATE_STOPPING) {
         UA_LOG_DEBUG(pcm->cm.eventSource.eventLoop->logger, UA_LOGCATEGORY_NETWORK,
-                     "ETH\t| All sockets closed, the EventLoop has stopped");
+                     "ETH\t| All sockets closed, the ETH ConnectionManager has stopped");
         pcm->cm.eventSource.state = UA_EVENTSOURCESTATE_STOPPED;
     }
 }
