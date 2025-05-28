@@ -55,7 +55,7 @@ UA_Subscription_delete(UA_Server *server, UA_Subscription *sub) {
     if(sub->session) {
         /* Use a browse path to find the node */
         char subIdStr[32];
-        snprintf(subIdStr, 32, "%u", sub->subscriptionId);
+        UA_snprintf(subIdStr, 32, "%u", sub->subscriptionId);
         UA_BrowsePath bp;
         UA_BrowsePath_init(&bp);
         bp.startingNode = sub->session->sessionId;

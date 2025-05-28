@@ -201,7 +201,7 @@ createSubscriptionObject(UA_Server *server, UA_Session *session,
     UA_NodeId hasComponent = UA_NODEID_NUMERIC(0, UA_NS0ID_HASCOMPONENT);
 
     char subIdStr[32];
-    snprintf(subIdStr, 32, "%u", sub->subscriptionId);
+    UA_snprintf(subIdStr, 32, "%u", sub->subscriptionId);
 
     /* Find the NodeId of the SubscriptionDiagnosticsArray */
     UA_BrowsePath bp;
