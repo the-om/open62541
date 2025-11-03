@@ -13,12 +13,12 @@
 /* Timer */
 /*********/
 
-/* Process delayed callbacks immediately */
 static UA_DateTime
 UA_EventLoopPOSIX_nextCyclicTime(UA_EventLoop *public_el) {
     UA_EventLoopPOSIX *el = (UA_EventLoopPOSIX*)public_el;
+    /* Process delayed callbacks immediately */
     if(el->delayedCallbacks)
-        el->eventLoop.dateTime_nowMonotonic(&el->eventLoop);
+        return el->eventLoop.dateTime_nowMonotonic(&el->eventLoop);
     return UA_Timer_nextRepeatedTime(&el->timer);
 }
 
